@@ -23,7 +23,7 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # ── Embedding 配置 ────────────────────────────────────────
 
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 
 # ── 分块参数 ──────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ CHUNK_OVERLAP = 100    # 相邻块之间的重叠字符数
 # ── 检索参数 ──────────────────────────────────────────────
 
 TOP_K = 5              # 检索返回的文档块数量
+BM25_ALPHA = 0.7       # 混合检索融合权重: α * 向量分数 + (1-α) * BM25 分数
 
 # ── System Prompt ─────────────────────────────────────────
 

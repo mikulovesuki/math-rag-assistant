@@ -46,59 +46,112 @@ def handle_upload(files: list) -> str:
     return f"已保存 {len(saved)} 个文件: {', '.join(saved)}"
 
 
-def handle_build_index() -> str:
+def handle_build_index() -> tuple[str, str]:
     try:
         p = get_pipeline()
         msg = p.build_index()
         stats = p.stats
-        return f"{msg}\n\n当前: {stats['paper_count']} 篇论文, {stats['chunk_count']} 个分块"
+        return (
+            f"{msg}\n\n当前: {stats['paper_count']} 篇论文, {stats['chunk_count']} 个分块",
+            index_status_text(),
+        )
     except Exception as e:
-        return f"构建失败: {e}"
+        return f"构建失败: {e}", index_status_text()
 
 
-def handle_chat(message: str, history: list[dict]) -> tuple[str, list[dict]]:
+def _append(history: list[dict], role: str, content: str) -> None:
+    """向聊天记录追加一条消息"""
+    history.append({"role": role, "content": content})
+
+
+def handle_chat(message: str, history: list[dict]):
+    """流式问答：逐段产出回答，最后附加参考来源"""
     if not message.strip():
-        return "", history
+        yield gr.update(), history
+        return
 
     if not config.has_api_key():
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content":
-            "尚未配置 API Key，无法生成回答。\n\n请点击左上角菜单，进入「配置密钥」完成配置。"
-        })
-        return "", history
+        _append(history, "user", message)
+        _append(history, "assistant",
+                "尚未配置 API Key，无法生成回答。\n\n请点击左上角菜单，进入「配置密钥」完成配置。")
+        yield gr.update(value=""), list(history)
+        return
 
     try:
         p = get_pipeline()
     except Exception as e:
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": f"系统初始化失败: {e}"})
-        return "", history
+        _append(history, "user", message)
+        _append(history, "assistant", f"系统初始化失败: {e}")
+        yield gr.update(value=""), list(history)
+        return
 
-    if p.vector_store.size == 0:
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content":
-            "尚未构建索引，无法检索论文内容。\n\n请点击左上角菜单，进入「上传论文」上传文件并构建索引。"
-        })
-        return "", history
-
+    # 检索（失败时不加载/调用 LLM）
     try:
-        answer, sources = p.query(message)
-        if sources:
-            source_lines = ["\n\n---\n**参考来源:**"]
-            for i, s in enumerate(sources, 1):
-                source_lines.append(f"{i}. {s.source} (相关度: {s.score:.3f})")
-            answer = answer + "\n".join(source_lines)
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": answer})
+        chunks, error = p.prepare_query(message)
     except Exception as e:
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": f"处理失败: {e}"})
+        _append(history, "user", message)
+        _append(history, "assistant", f"检索失败: {e}")
+        yield gr.update(value=""), list(history)
+        return
 
-    return "", history
+    if chunks is None:
+        _append(history, "user", message)
+        _append(history, "assistant", error)
+        yield gr.update(value=""), list(history)
+        return
+
+    # LLM 侧历史：仅最近 6 轮，保持上下文长度可控
+    llm_history = [
+        {"role": h["role"], "content": h["content"]}
+        for h in history[-12:]
+        if h.get("role") in ("user", "assistant")
+    ]
+
+    _append(history, "user", message)
+    _append(history, "assistant", "")
+    assistant_msg = ""
+    try:
+        for delta in p.stream_answer(message, chunks, llm_history):
+            assistant_msg += delta
+            history[-1]["content"] = assistant_msg
+            yield gr.update(value=""), list(history)
+    except Exception as e:
+        history[-1]["content"] = f"生成失败: {e}"
+        yield gr.update(value=""), list(history)
+        return
+
+    # 生成完成后追加参考来源
+    if chunks:
+        source_lines = ["\n\n---\n**参考来源:**"]
+        for i, s in enumerate(chunks, 1):
+            ref = s.source
+            if s.heading:
+                ref += f" §{s.heading}"
+            source_lines.append(f"{i}. {ref} (相关度: {s.score:.3f})")
+        history[-1]["content"] = assistant_msg + "\n".join(source_lines)
+
+    yield gr.update(value=""), list(history)
 
 
 def handle_clear() -> list[dict]:
     return []
+
+
+def index_status_text() -> str:
+    """索引状态面板文案（防御性获取，不抛异常）"""
+    try:
+        p = get_pipeline()
+        st = p.stats
+        if st["chunk_count"] == 0:
+            return "未构建"
+        if not st["index_loaded"]:
+            return f"不可用: {st['load_message']}"
+        fresh, msg = p.index_fresh()
+        if not fresh:
+            return f"需重建: {msg}"
+        return f"已构建 ({st['chunk_count']} 块 / {st['paper_count']} 篇)"
+    except Exception as e:
+        return f"加载失败: {e}"
 
 
 # ── 侧边栏切换 ───────────────────────────────────────────
@@ -109,11 +162,14 @@ def toggle_sidebar(visible: bool) -> tuple[gr.update, bool, gr.update]:
     btn_text = "<< 收起菜单" if new_visible else ">> 展开菜单"
     return gr.update(visible=new_visible), new_visible, gr.update(value=btn_text)
 
+
 def show_config() -> tuple[gr.update, gr.update, gr.update]:
     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
+
 def show_upload() -> tuple[gr.update, gr.update, gr.update]:
     return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+
 
 def show_chat() -> tuple[gr.update, gr.update, gr.update]:
     return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
@@ -235,7 +291,7 @@ def create_app() -> gr.Blocks:
                 )
                 index_status = gr.Textbox(
                     label="论文索引",
-                    value="未构建",
+                    value=index_status_text(),
                     interactive=False,
                     elem_classes=["status-box"],
                 )
@@ -279,7 +335,7 @@ def create_app() -> gr.Blocks:
                     index_result = gr.Textbox(label="索引结果", interactive=False, lines=3)
 
                     upload_btn.click(fn=handle_upload, inputs=[file_upload], outputs=[upload_status])
-                    index_btn.click(fn=handle_build_index, outputs=[index_result])
+                    index_btn.click(fn=handle_build_index, outputs=[index_result, index_status])
 
                 # 面板 3: 智能问答
                 with gr.Column(visible=False) as panel_chat:
@@ -292,6 +348,8 @@ def create_app() -> gr.Blocks:
                             height=500,
                             elem_classes=["chat-window"],
                             show_label=False,
+                            # Gradio 6 原生 KaTeX 渲染块级公式
+                            latex_delimiters=[{"left": "$$", "right": "$$", "display": True}],
                         )
                         with gr.Row():
                             msg_input = gr.Textbox(

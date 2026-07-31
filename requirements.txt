@@ -1,6 +1,9 @@
-numpy
-sentence-transformers
-markitdown[all]
-openai
-gradio
-python-dotenv
+numpy>=1.24
+sentence-transformers>=3.0
+markitdown[all]>=0.1.0
+openai>=1.30
+gradio>=6.0
+python-dotenv>=1.0
+rank_bm25>=0.2.2
+jieba>=0.42
+pytest>=8.0

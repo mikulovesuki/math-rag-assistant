@@ -1,17 +1,16 @@
 """文档转换器 - 用 MarkItDown 将 PDF/Word 等文件转为文本"""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from .models import Document
 
-# 支持的文件扩展名
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".pptx", ".html", ".htm", ".txt", ".md"}
-
 
 class DocumentConverter:
     """封装 MarkItDown，将各种格式文档转为纯文本"""
+
+    # 支持的文件扩展名
+    SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".pptx", ".html", ".htm", ".txt", ".md"}
 
     def __init__(self):
         from markitdown import MarkItDown
@@ -22,8 +21,11 @@ class DocumentConverter:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"文件不存在: {path}")
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            raise ValueError(f"不支持的文件格式: {path.suffix}（支持: {SUPPORTED_EXTENSIONS}）")
+        if path.suffix.lower() not in DocumentConverter.SUPPORTED_EXTENSIONS:
+            raise ValueError(
+                f"不支持的文件格式: {path.suffix}"
+                f"（支持: {DocumentConverter.SUPPORTED_EXTENSIONS}）"
+            )
 
         result = self._converter.convert(str(path))
         return Document(
@@ -39,7 +41,7 @@ class DocumentConverter:
 
         documents: list[Document] = []
         for path in sorted(directory.iterdir()):
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if path.is_file() and path.suffix.lower() in DocumentConverter.SUPPORTED_EXTENSIONS:
                 try:
                     doc = self.convert(path)
                     if doc.text.strip():
