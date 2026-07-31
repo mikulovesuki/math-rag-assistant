@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# 环境配置
+.env
+
+# 向量索引（自动生成）
+data/index/*
+!data/index/.gitkeep
+
+# 模型缓存
+.cache/
