@@ -49,7 +49,7 @@ graph LR
     subgraph "阶段2: 在线检索 Retrieval"
         H[用户提问 + 多轮历史] -->|embed + 指令前缀| D
         H -->|jieba 分词| E
-        D -->|cosine 相似度| I[分数融合<br/>alpha * cosine + (1-alpha) * bm25_norm]
+        D -->|cosine 相似度| I["分数融合<br/>alpha * cosine + (1-alpha) * bm25_norm"]
         E -->|BM25 分数 + min-max 归一化| I
         I -->|Top-K| J[相关 Chunk + 章节引用]
     end
