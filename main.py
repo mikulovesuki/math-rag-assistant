@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 import gradio as gr
 
 import config
+from core.conversations import ConversationStore
 from core.pipeline import MathRAGPipeline
 
 _pipeline: MathRAGPipeline | None = None
+_store = ConversationStore(config.CONVERSATIONS_DIR)
 
 
 def get_pipeline() -> MathRAGPipeline:
@@ -64,17 +67,53 @@ def _append(history: list[dict], role: str, content: str) -> None:
     history.append({"role": role, "content": content})
 
 
-def handle_chat(message: str, history: list[dict]):
-    """流式问答：逐段产出回答，最后附加参考来源"""
+# ── 历史会话 ─────────────────────────────────────────────
+
+def _session_choices() -> list[tuple[str, str]]:
+    """侧边栏下拉选项: "标题 · MM-DD HH:MM" -> 会话 id"""
+    return [
+        (
+            f"{m.title} · {time.strftime('%m-%d %H:%M', time.localtime(m.updated_at_ns / 1e9))}",
+            m.id,
+        )
+        for m in _store.list()
+    ]
+
+
+def handle_load_session(sid: str):
+    """加载历史会话：恢复消息并切换到问答面板"""
+    data = _store.load(sid) if sid else None
+    history = list(data["messages"]) if data else []
+    return list(history), *show_chat(), sid if data else ""
+
+
+def handle_delete_session(sid: str) -> tuple[list, str, gr.update]:
+    """删除会话并清空当前聊天区"""
+    if sid:
+        _store.delete(sid)
+    return [], "", gr.update(choices=_session_choices(), value=None)
+
+
+def handle_new_chat() -> tuple[list, str]:
+    """开始新对话：清空聊天区与当前会话 id"""
+    return [], ""
+
+
+def handle_chat(message: str, history: list[dict], session_id: str):
+    """
+    流式问答：逐段产出回答，最后附加参考来源；
+    结束时自动保存会话（失败消息也保存，保证历史完整）。
+    """
     if not message.strip():
-        yield gr.update(), history
+        yield gr.update(), history, session_id, gr.update()
         return
 
     if not config.has_api_key():
         _append(history, "user", message)
         _append(history, "assistant",
                 "尚未配置 API Key，无法生成回答。\n\n请点击左上角菜单，进入「配置密钥」完成配置。")
-        yield gr.update(value=""), list(history)
+        session_id = _store.save(history, session_id)
+        yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
         return
 
     try:
@@ -82,7 +121,8 @@ def handle_chat(message: str, history: list[dict]):
     except Exception as e:
         _append(history, "user", message)
         _append(history, "assistant", f"系统初始化失败: {e}")
-        yield gr.update(value=""), list(history)
+        session_id = _store.save(history, session_id)
+        yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
         return
 
     # 检索（失败时不加载/调用 LLM）
@@ -91,13 +131,15 @@ def handle_chat(message: str, history: list[dict]):
     except Exception as e:
         _append(history, "user", message)
         _append(history, "assistant", f"检索失败: {e}")
-        yield gr.update(value=""), list(history)
+        session_id = _store.save(history, session_id)
+        yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
         return
 
     if chunks is None:
         _append(history, "user", message)
         _append(history, "assistant", error)
-        yield gr.update(value=""), list(history)
+        session_id = _store.save(history, session_id)
+        yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
         return
 
     # LLM 侧历史：仅最近 6 轮，保持上下文长度可控
@@ -114,10 +156,11 @@ def handle_chat(message: str, history: list[dict]):
         for delta in p.stream_answer(message, chunks, llm_history):
             assistant_msg += delta
             history[-1]["content"] = assistant_msg
-            yield gr.update(value=""), list(history)
+            yield gr.update(value=""), list(history), gr.update(), gr.update()
     except Exception as e:
         history[-1]["content"] = f"生成失败: {e}"
-        yield gr.update(value=""), list(history)
+        session_id = _store.save(history, session_id)
+        yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
         return
 
     # 生成完成后追加参考来源
@@ -130,7 +173,8 @@ def handle_chat(message: str, history: list[dict]):
             source_lines.append(f"{i}. {ref} (相关度: {s.score:.3f})")
         history[-1]["content"] = assistant_msg + "\n".join(source_lines)
 
-    yield gr.update(value=""), list(history)
+    session_id = _store.save(history, session_id)
+    yield gr.update(value=""), list(history), session_id, gr.update(choices=_session_choices())
 
 
 def handle_clear() -> list[dict]:
@@ -264,8 +308,9 @@ CUSTOM_CSS = """
 
 def create_app() -> gr.Blocks:
     with gr.Blocks(title="数学论文智能问答助手") as app:
-        # 侧边栏状态
+        # 侧边栏状态 / 当前会话状态
         sidebar_state = gr.State(True)
+        session_state = gr.State("")
 
         # 顶部栏：切换按钮 + 标题
         with gr.Row(elem_id="topbar"):
@@ -295,6 +340,19 @@ def create_app() -> gr.Blocks:
                     interactive=False,
                     elem_classes=["status-box"],
                 )
+
+                # 历史对话
+                gr.Markdown("---")
+                gr.Markdown("### 历史对话")
+                session_drop = gr.Dropdown(
+                    label="选择会话",
+                    choices=_session_choices(),
+                    interactive=True,
+                )
+                with gr.Row():
+                    load_sess_btn = gr.Button("加载", size="sm")
+                    del_sess_btn = gr.Button("删除", size="sm")
+                new_chat_btn = gr.Button("新对话", size="sm", variant="secondary")
 
             # ── 主内容区 ──
             with gr.Column(scale=4):
@@ -364,8 +422,16 @@ def create_app() -> gr.Blocks:
 
                     clear_btn = gr.Button("清空对话", variant="secondary", size="sm")
 
-                    send_btn.click(fn=handle_chat, inputs=[msg_input, chatbot], outputs=[msg_input, chatbot])
-                    msg_input.submit(fn=handle_chat, inputs=[msg_input, chatbot], outputs=[msg_input, chatbot])
+                    send_btn.click(
+                        fn=handle_chat,
+                        inputs=[msg_input, chatbot, session_state],
+                        outputs=[msg_input, chatbot, session_state, session_drop],
+                    )
+                    msg_input.submit(
+                        fn=handle_chat,
+                        inputs=[msg_input, chatbot, session_state],
+                        outputs=[msg_input, chatbot, session_state, session_drop],
+                    )
                     clear_btn.click(fn=handle_clear, outputs=[chatbot])
 
             # ── 事件绑定 ──
@@ -377,6 +443,19 @@ def create_app() -> gr.Blocks:
             nav_config.click(fn=show_config, outputs=[panel_config, panel_upload, panel_chat])
             nav_upload.click(fn=show_upload, outputs=[panel_config, panel_upload, panel_chat])
             nav_chat.click(fn=show_chat, outputs=[panel_config, panel_upload, panel_chat])
+
+            # 历史会话
+            load_sess_btn.click(
+                fn=handle_load_session,
+                inputs=[session_drop],
+                outputs=[chatbot, panel_config, panel_upload, panel_chat, session_state],
+            )
+            del_sess_btn.click(
+                fn=handle_delete_session,
+                inputs=[session_drop],
+                outputs=[chatbot, session_state, session_drop],
+            )
+            new_chat_btn.click(fn=handle_new_chat, outputs=[chatbot, session_state])
 
     return app
 

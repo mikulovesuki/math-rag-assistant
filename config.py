@@ -14,6 +14,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 PAPERS_DIR = BASE_DIR / "data" / "papers"
 INDEX_DIR = BASE_DIR / "data" / "index"
+CONVERSATIONS_DIR = BASE_DIR / "data" / "conversations"
 
 # ── DeepSeek LLM 配置 ─────────────────────────────────────
 
