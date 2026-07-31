@@ -56,10 +56,10 @@ def handle_build_index() -> tuple[str, str]:
         stats = p.stats
         return (
             f"{msg}\n\n当前: {stats['paper_count']} 篇论文, {stats['chunk_count']} 个分块",
-            index_status_text(),
+            index_status_html(),
         )
     except Exception as e:
-        return f"构建失败: {e}", index_status_text()
+        return f"构建失败: {e}", index_status_html()
 
 
 def _append(history: list[dict], role: str, content: str) -> None:
@@ -182,7 +182,7 @@ def handle_clear() -> list[dict]:
 
 
 def index_status_text() -> str:
-    """索引状态面板文案（防御性获取，不抛异常）"""
+    """索引状态文案（防御性获取，不抛异常）"""
     try:
         p = get_pipeline()
         st = p.stats
@@ -196,6 +196,27 @@ def index_status_text() -> str:
         return f"已构建 ({st['chunk_count']} 块 / {st['paper_count']} 篇)"
     except Exception as e:
         return f"加载失败: {e}"
+
+
+# ── 状态徽章 ─────────────────────────────────────────────
+
+def _badge(text: str, ok: bool | None = None) -> str:
+    """状态徽章 HTML；ok=None 时按文字是否含「已」推断"""
+    if ok is None:
+        ok = "已" in text
+    cls = "ok" if ok else "warn"
+    return f"<span class=\"badge {cls}\">● {text}</span>"
+
+
+def index_status_html() -> str:
+    """索引状态徽章（Markdown 兼容 HTML）"""
+    return f"**索引** {_badge(index_status_text())}"
+
+
+def api_status_html() -> str:
+    """API 密钥状态徽章"""
+    ok = config.has_api_key()
+    return f"**密钥** {_badge('已配置' if ok else '未配置', ok)}"
 
 
 # ── 侧边栏切换 ───────────────────────────────────────────
@@ -222,85 +243,212 @@ def show_chat() -> tuple[gr.update, gr.update, gr.update]:
 # ── CSS ──────────────────────────────────────────────────
 
 CUSTOM_CSS = """
-/* 全局 */
+/* ═══════════ 全局：纸张质感 ═══════════ */
 .gradio-container {
-    font-family: 'Georgia', 'Times New Roman', serif;
-    max-width: 1200px !important;
+    max-width: 1280px !important;
+    background: #faf9f6 !important;
+    font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    color: #1f2430;
+    letter-spacing: 0.01em;
 }
+footer { display: none !important; }
 
-/* 顶部栏 */
-#topbar {
-    padding: 8px 0;
-    margin-bottom: 5px;
+/* ═══════════ 顶部：期刊眉题 ═══════════ */
+#topbar { padding: 18px 4px 8px; margin-bottom: 8px; }
+.masthead { padding: 2px 6px; }
+.eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.35em;
+    color: #b08d57;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+.masthead-title {
+    font-family: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #1e3a5f;
+    margin: 0 0 4px;
+    letter-spacing: 0.02em;
+}
+.masthead-sub {
+    font-size: 12.5px;
+    color: #8a8f98;
+    margin: 0;
+    letter-spacing: 0.05em;
 }
 #toggle-btn {
-    max-width: 120px;
-    font-size: 14px;
+    max-width: 110px;
+    font-size: 12.5px;
+    background: transparent !important;
+    border: 1px solid #ddd8cc !important;
+    color: #6b7280 !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
 }
+#toggle-btn:hover { border-color: #1e3a5f !important; color: #1e3a5f !important; }
 
-/* 侧边栏 - 紧凑 */
+/* ═══════════ 侧边栏：白卡 + 墨蓝书脊 ═══════════ */
 #sidebar {
-    background-color: #1a1a2e;
-    border-radius: 10px;
-    padding: 15px;
-    min-height: 550px;
+    background: #ffffff !important;
+    border: 1px solid #e7e3d8;
+    border-left: 3px solid #1e3a5f;
+    border-radius: 4px;
+    padding: 20px 16px;
+    min-height: 560px;
+    box-shadow: 0 1px 3px rgba(30, 58, 95, 0.04);
 }
 #sidebar h2 {
-    color: #e0e0e0;
-    font-size: 16px;
-    border-bottom: 1px solid #2c3e50;
+    font-family: Georgia, 'Noto Serif SC', serif;
+    font-size: 13px;
+    color: #b08d57;
+    letter-spacing: 0.25em;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin: 4px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #efece3;
+}
+#sidebar h3 {
+    font-family: Georgia, 'Noto Serif SC', serif;
+    font-size: 13px;
+    color: #1e3a5f;
+    letter-spacing: 0.2em;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin: 22px 0 10px;
     padding-bottom: 6px;
-    margin-bottom: 10px;
+    border-bottom: 1px solid #f0ede4;
 }
 #sidebar .nav-btn {
     width: 100%;
     text-align: left;
-    margin-bottom: 5px;
-    background-color: #16213e !important;
-    color: #a0a0b0 !important;
-    border: 1px solid #2c3e50 !important;
-    border-radius: 6px !important;
-    padding: 8px 12px !important;
-    font-size: 13px;
+    margin-bottom: 4px;
+    background: transparent !important;
+    color: #4a5261 !important;
+    border: none !important;
+    border-radius: 4px !important;
+    padding: 9px 12px !important;
+    font-size: 13.5px;
+    font-weight: 400;
+    box-shadow: none !important;
+    border-left: 2px solid transparent !important;
+    transition: all 0.15s ease;
 }
 #sidebar .nav-btn:hover {
-    background-color: #0f3460 !important;
-    color: #ffffff !important;
-}
-#sidebar .status-box {
-    background-color: #16213e !important;
-    border: 1px solid #2c3e50 !important;
-    border-radius: 6px;
-    color: #a0a0b0;
-    font-size: 12px;
-    padding: 6px 10px;
+    background: #f4f1ea !important;
+    color: #1e3a5f !important;
+    border-left: 2px solid #b08d57 !important;
 }
 
-/* 聊天框深色 */
-#chat-area {
-    background-color: #1a1a2e !important;
-    border: 1px solid #2c3e50 !important;
-    border-radius: 10px;
-    overflow: hidden;
+/* 状态徽章 */
+.badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 400;
+    padding: 2px 10px;
+    border-radius: 999px;
+    margin-left: 4px;
 }
-#chat-area .chat-window { background-color: #0d1117 !important; }
+.badge.ok { color: #2f7d4f; background: #e9f5ec; }
+.badge.warn { color: #9a6b1f; background: #faf3e2; }
+
+/* ═══════════ 主区面板 ═══════════ */
+#main-area .panel { animation: fadeIn 0.25s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+#main-area h2 {
+    font-family: Georgia, 'Noto Serif SC', serif;
+    font-size: 20px;
+    color: #1e3a5f;
+    font-weight: 700;
+    margin: 8px 0 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #efece3;
+    position: relative;
+}
+#main-area h2::after {
+    content: '';
+    position: absolute;
+    left: 0; bottom: -2px;
+    width: 52px;
+    height: 2px;
+    background: #b08d57;
+}
+#main-area > div > .markdown p {
+    color: #6b7280;
+    font-size: 13.5px;
+    line-height: 1.75;
+}
+
+/* 输入控件：细边框 */
+#main-area input, #main-area textarea, #main-area .file-preview, .gradio-dropdown {
+    border-color: #ddd8cc !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+}
+#main-area textarea:focus, #main-area input:focus {
+    border-color: #1e3a5f !important;
+    box-shadow: 0 0 0 2px rgba(30, 58, 95, 0.08) !important;
+}
+
+/* 按钮：克制的学术色 */
+#main-area .primary, .gradio-button.primary {
+    background: #1e3a5f !important;
+    border: none !important;
+    border-radius: 6px !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+#main-area .primary:hover { background: #16314f !important; }
+.gradio-button.secondary, .gradio-button.sm {
+    background: transparent !important;
+    border: 1px solid #d5d0c2 !important;
+    border-radius: 6px !important;
+    color: #5a6270 !important;
+    box-shadow: none !important;
+}
+.gradio-button.secondary:hover { border-color: #1e3a5f !important; color: #1e3a5f !important; }
+
+/* ═══════════ 聊天区：论文评注风 ═══════════ */
+#chat-area {
+    background: #ffffff !important;
+    border: 1px solid #e7e3d8 !important;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(30, 58, 95, 0.04);
+}
+#chat-area .chat-window { background: #fdfcfa !important; }
 #chat-area .message {
-    font-family: 'Georgia', serif;
-    color: #e0e0e0 !important;
-    line-height: 1.6;
+    font-family: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+    color: #2a3040 !important;
+    line-height: 1.75;
+    font-size: 14.5px;
 }
 #chat-area .message-user {
-    background-color: #0f3460 !important;
-    border: 1px solid #1a5276 !important;
-    border-radius: 10px !important;
+    background: #1e3a5f !important;
+    border-radius: 4px !important;
     padding: 12px 16px !important;
+    color: #f2f4f8 !important;
 }
 #chat-area .message-bot {
-    background-color: #1a1a2e !important;
-    border: 1px solid #2c3e50 !important;
-    border-radius: 10px !important;
+    background: #ffffff !important;
+    border: 1px solid #e9e5da !important;
+    border-radius: 4px !important;
     padding: 12px 16px !important;
 }
+#chat-area .message-bot pre { background: #f6f4ee !important; border-radius: 4px; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d8d3c5; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #b8b2a0; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 分隔线 */
+hr { border-color: #efece3 !important; }
 """
 
 
@@ -312,34 +460,32 @@ def create_app() -> gr.Blocks:
         sidebar_state = gr.State(True)
         session_state = gr.State("")
 
-        # 顶部栏：切换按钮 + 标题
+        # 顶部栏：切换按钮 + 期刊风格标题
         with gr.Row(elem_id="topbar"):
-            toggle_btn = gr.Button("<< 收起菜单", elem_id="toggle-btn", variant="secondary")
-            gr.Markdown("### 数学论文智能问答助手")
+            toggle_btn = gr.Button("≪ 收起", elem_id="toggle-btn", variant="secondary")
+            gr.HTML(
+                """
+                <div class="masthead">
+                    <div class="eyebrow">Math RAG Assistant · Hybrid Retrieval</div>
+                    <h1 class="masthead-title">数学论文智能问答助手</h1>
+                    <p class="masthead-sub">对任意论文建库 · 带章节级引用的多轮问答</p>
+                </div>
+                """
+            )
 
         with gr.Row():
             # ── 侧边栏（可隐藏）──
             with gr.Column(scale=1, elem_id="sidebar", visible=True) as sidebar:
                 gr.Markdown("## 导航")
 
-                nav_config = gr.Button("配置密钥", elem_classes=["nav-btn"])
-                nav_upload = gr.Button("上传论文", elem_classes=["nav-btn"])
-                nav_chat = gr.Button("智能问答", elem_classes=["nav-btn"])
+                nav_config = gr.Button("01 · 配置密钥", elem_classes=["nav-btn"])
+                nav_upload = gr.Button("02 · 上传论文", elem_classes=["nav-btn"])
+                nav_chat = gr.Button("03 · 智能问答", elem_classes=["nav-btn"])
 
                 gr.Markdown("---")
                 gr.Markdown("### 状态")
-                api_status = gr.Textbox(
-                    label="API 密钥",
-                    value="已配置" if config.has_api_key() else "未配置",
-                    interactive=False,
-                    elem_classes=["status-box"],
-                )
-                index_status = gr.Textbox(
-                    label="论文索引",
-                    value=index_status_text(),
-                    interactive=False,
-                    elem_classes=["status-box"],
-                )
+                api_status = gr.Markdown(api_status_html())
+                index_status = gr.Markdown(index_status_html())
 
                 # 历史对话
                 gr.Markdown("---")
@@ -355,10 +501,9 @@ def create_app() -> gr.Blocks:
                 new_chat_btn = gr.Button("新对话", size="sm", variant="secondary")
 
             # ── 主内容区 ──
-            with gr.Column(scale=4):
-
+            with gr.Column(scale=4, elem_id="main-area"):
                 # 面板 1: 配置密钥
-                with gr.Column(visible=True) as panel_config:
+                with gr.Column(visible=True, elem_classes=["panel"]) as panel_config:
                     gr.Markdown("## 配置 DeepSeek API 密钥")
                     gr.Markdown(
                         "AI 生成回答需要调用 DeepSeek API。密钥只需配置一次，会自动保存到本地。\n\n"
@@ -376,7 +521,7 @@ def create_app() -> gr.Blocks:
                     save_btn.click(fn=handle_save_api_key, inputs=[api_key_input], outputs=[save_result])
 
                 # 面板 2: 上传论文
-                with gr.Column(visible=False) as panel_upload:
+                with gr.Column(visible=False, elem_classes=["panel"]) as panel_upload:
                     gr.Markdown("## 上传论文文件")
                     gr.Markdown("支持 PDF、Word、TXT、Markdown 格式。上传后点击「构建索引」。")
 
@@ -396,7 +541,7 @@ def create_app() -> gr.Blocks:
                     index_btn.click(fn=handle_build_index, outputs=[index_result, index_status])
 
                 # 面板 3: 智能问答
-                with gr.Column(visible=False) as panel_chat:
+                with gr.Column(visible=False, elem_classes=["panel"]) as panel_chat:
                     gr.Markdown("## 智能问答")
                     gr.Markdown("基于已索引的论文内容提问，AI 会给出带来源引用的回答。")
 
@@ -467,6 +612,6 @@ if __name__ == "__main__":
         server_port=7860,
         share=False,
         inbrowser=False,
-        theme=gr.themes.Soft(),
+        theme=gr.themes.Base(),
         css=CUSTOM_CSS,
     )
